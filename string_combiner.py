@@ -1,0 +1,45 @@
+class DynamicStringCombiner:
+    @classmethod
+    def INPUT_TYPES(s):
+        inputs = {
+            "required": {
+                "delimiter": ("STRING", {"default": ",", "multiline": False}),
+                "remove_empty": ("BOOLEAN", {"default": True}),
+            },
+            "optional": {}
+        }
+        
+        # Add string_1 to string_6 as widgets
+        for i in range(1, 7):
+            inputs["optional"][f"string_{i}"] = ("STRING", {"default": "", "multiline": True})
+            
+        return inputs
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("combined_string",)
+    FUNCTION = "combine"
+    CATEGORY = "string_tools"
+
+    def combine(self, delimiter, remove_empty, **kwargs):
+        strings_to_combine = []
+        
+        # Iterate through string_1 to string_6
+        for i in range(1, 7):
+            key = f"string_{i}"
+            value = kwargs.get(key, None)
+            
+            if value is not None:
+                # If remove_empty is True, strip whitespace and check if empty
+                if remove_empty:
+                    value = value.strip()
+                    if value:  # Only add if not empty string after strip
+                         strings_to_combine.append(value)
+                else:
+                    # If remove_empty is False, just add the value (even if it's empty or just whitespace? 
+                    # Prompt says: "If remove_empty is true, must automatically delete whitespace (strip).
+                    # Logic: "Join all strings that have content". 
+                    # Assume if remove_empty is False, we keep them as is. 
+                    strings_to_combine.append(value)
+        
+        result = delimiter.join(strings_to_combine)
+        return (result,)

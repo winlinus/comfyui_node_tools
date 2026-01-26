@@ -9,8 +9,8 @@ class DynamicStringCombiner:
             "optional": {}
         }
         
-        # Add string_1 to string_6 as widgets
-        for i in range(1, 7):
+        # Add string_1 to string_10 as widgets
+        for i in range(1, 11):
             inputs["optional"][f"string_{i}"] = ("STRING", {"default": "", "multiline": True})
             
         return inputs
@@ -23,8 +23,8 @@ class DynamicStringCombiner:
     def combine(self, delimiter, remove_empty, **kwargs):
         strings_to_combine = []
         
-        # Iterate through string_1 to string_6
-        for i in range(1, 7):
+        # Iterate through string_1 to string_10
+        for i in range(1, 11):
             key = f"string_{i}"
             value = kwargs.get(key, None)
             

@@ -7,3 +7,5 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "DynamicStringCombiner": "Dynamic String Combiner"
 }
+
+WEB_DIRECTORY = "./js"

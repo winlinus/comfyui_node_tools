@@ -34,10 +34,20 @@ styleElement.textContent = `
         user-select: none;
         border: 1px solid var(--border-color);
         font-size: 12px;
+        transition: transform 0.2s cubic-bezier(0.25, 0.8, 0.25, 1), box-shadow 0.2s;
     }
     
+    .comfy-chip:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        z-index: 10;
+        background-color: var(--comfy-input-bg);
+    }
+
     .comfy-chip:active {
         cursor: grabbing;
+        transform: scale(0.98);
+        box-shadow: none;
     }
 
     .comfy-chip.dragging {
@@ -90,18 +100,20 @@ styleElement.textContent = `
     }
 
     .comfy-chip-placeholder {
-        width: 4px;
-        background-color: var(--primary-color, #2a81f6);
-        border-radius: 2px;
-        margin: 0 2px;
+        width: 60px; /* Default width, will be dynamic if possible or fixed min-width */
+        height: 24px;
+        background-color: rgba(255, 255, 255, 0.05);
+        border: 1px dashed var(--primary-color, #2a81f6);
+        border-radius: 12px;
+        margin: 0 4px;
         pointer-events: none;
-        animation: pulse 1s infinite;
+        flex-shrink: 0;
+        animation: popIn 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     }
 
-    @keyframes pulse {
-        0% { opacity: 0.5; }
-        50% { opacity: 1; }
-        100% { opacity: 0.5; }
+    @keyframes popIn {
+        from { transform: scale(0); width: 0; margin: 0; opacity: 0; }
+        to { transform: scale(1); width: 60px; margin: 0 4px; opacity: 1; }
     }
 `;
 document.head.appendChild(styleElement);
@@ -317,6 +329,36 @@ function transformToChips(widget, node) {
                     sourceNodeId: node.id,
                     index: index
                 }));
+                // Custom Drag Ghost
+                // We create a clone off-screen or use the element itself styles
+                // Standard setDragImage requires a visible element.
+                // Let's create a temporary clone to style exactly how we want.
+
+                // Note: browser default ghost is usually opacity 0.5 of element.
+                // We enabled class "dragging" which sets opacity 0.5 on original.
+                // If we want a "pop" effect, we can try to rely on browser or make a custom one.
+                // Custom ghost element:
+                const ghost = chip.cloneNode(true);
+                ghost.style.position = "absolute";
+                ghost.style.top = "-9999px";
+                ghost.style.left = "-9999px";
+                ghost.style.transform = "rotate(5deg) scale(1.1)";
+                ghost.style.background = "#2a81f6"; // Primary color bg
+                ghost.style.color = "white";
+                ghost.style.boxShadow = "0 10px 20px rgba(0,0,0,0.3)";
+                ghost.style.opacity = "1";
+                ghost.style.width = chip.offsetWidth + "px";
+                document.body.appendChild(ghost);
+
+                // We need to wait for render?
+                // setDragImage needs it to be visible.
+
+                e.dataTransfer.setDragImage(ghost, 10, 10);
+
+                requestAnimationFrame(() => {
+                    document.body.removeChild(ghost);
+                });
+
                 chip.classList.add("dragging");
 
                 // Add a global class or data attribute to blocking drag/drop on canvas if needed
@@ -423,9 +465,16 @@ function transformToChips(widget, node) {
         }
 
         if (insertBeforeElement) {
-            container.insertBefore(placeholder, insertBeforeElement);
+            // Check if placeholder is ALREADY there to avoid jitter/re-animation
+            if (placeholder.nextElementSibling !== insertBeforeElement) {
+                container.insertBefore(placeholder, insertBeforeElement);
+            }
         } else {
-            container.insertBefore(placeholder, input);
+            // Append
+            // Check if already last (before input)
+            if (placeholder.nextElementSibling !== input) {
+                container.insertBefore(placeholder, input);
+            }
         }
     });
 

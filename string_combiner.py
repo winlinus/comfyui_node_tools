@@ -2,16 +2,17 @@ class DynamicStringCombiner:
     @classmethod
     def INPUT_TYPES(s):
         inputs = {
-            "required": {
-                "delimiter": ("STRING", {"default": ",", "multiline": False}),
-                "remove_empty": ("BOOLEAN", {"default": True}),
-            },
+            "required": {},
             "optional": {}
         }
         
-        # Add string_1 to string_10 as widgets
+        # Add string_1 to string_10 as widgets first (to appear at top)
         for i in range(1, 11):
-            inputs["optional"][f"string_{i}"] = ("STRING", {"default": "", "multiline": True})
+            inputs["required"][f"string_{i}"] = ("STRING", {"default": "", "multiline": True})
+
+        # Add delimiter and remove_empty at the bottom
+        inputs["required"]["delimiter"] = ("STRING", {"default": ",", "multiline": False})
+        inputs["required"]["remove_empty"] = ("BOOLEAN", {"default": True})
             
         return inputs
 

@@ -17,9 +17,12 @@ styleElement.textContent = `
         margin-bottom: 5px;
         cursor: text;
         z-index: 9999;
+        position: relative; /* For clear button positioning */
+        padding-right: 25px; /* Make space for clear button */
     }
     
     .comfy-chip {
+        margin: 0 4px;
         background-color: var(--comfy-menu-bg);
         color: var(--fg-color);
         padding: 2px 8px;
@@ -61,6 +64,44 @@ styleElement.textContent = `
         outline: none;
         font-size: 12px;
         padding: 2px;
+        margin: 5px;
+    }
+
+    .comfy-chip-clear-all {
+        position: absolute;
+        top: 2px;
+        right: 2px;
+        cursor: pointer;
+        color: #888;
+        font-size: 14px;
+        width: 16px;
+        height: 16px;
+        line-height: 14px;
+        text-align: center;
+        border-radius: 50%;
+        background: rgba(0,0,0,0.1);
+        display: none; /* Hidden by default */
+        z-index: 10000;
+    }
+
+    .comfy-chip-clear-all:hover {
+        color: #ff4444;
+        background: rgba(0,0,0,0.2);
+    }
+
+    .comfy-chip-placeholder {
+        width: 4px;
+        background-color: var(--primary-color, #2a81f6);
+        border-radius: 2px;
+        margin: 0 2px;
+        pointer-events: none;
+        animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+        0% { opacity: 0.5; }
+        50% { opacity: 1; }
+        100% { opacity: 0.5; }
     }
 `;
 document.head.appendChild(styleElement);
@@ -129,6 +170,21 @@ function transformToChips(widget, node) {
     // This data structure will hold our chips state locally strictly for this widget instance
     let chips = [];
 
+    // Clear All Button
+    const clearBtn = document.createElement("div");
+    clearBtn.className = "comfy-chip-clear-all";
+    clearBtn.innerHTML = "×";
+    clearBtn.title = "Clear all";
+    clearBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (confirm("Clear all chips?")) {
+            chips = [];
+            updateWidgetValue();
+            renderChips();
+        }
+    };
+    container.appendChild(clearBtn);
+
     // Helper to sync value BACK to the widget
     function updateWidgetValue() {
         const newValue = chips.join(", ");
@@ -139,13 +195,14 @@ function transformToChips(widget, node) {
 
     // Helper to render chips in our container
     function renderChips() {
-        // Clear existing chips from DOM (keep input)
-        // Array.from(container.children).forEach(child => {
-        //     if (child !== input) container.removeChild(child);
-        // });
-        // The above re-appending input loses focus. Better:
+        // Manage Clear Button Visibility
+        if (chips.length > 0) {
+            clearBtn.style.display = "block";
+        } else {
+            clearBtn.style.display = "none";
+        }
 
-        while (container.firstChild && container.firstChild !== input) {
+        while (container.firstChild && container.firstChild !== input && container.firstChild !== clearBtn) {
             container.removeChild(container.firstChild);
         }
 
@@ -171,6 +228,86 @@ function transformToChips(widget, node) {
             };
             chip.appendChild(removeBtn);
 
+            // Chip Weight Adjustment (Wheel)
+            chip.addEventListener("wheel", (e) => {
+                e.preventDefault();
+                const delta = e.deltaY < 0 ? 0.1 : -0.1;
+
+                let content = chipText;
+                let weight = 1.0;
+
+                // Parse existing weight (text:1.1)
+                const match = content.match(/^\((.+):([0-9]*\.?[0-9]+)\)$/);
+                if (match) {
+                    content = match[1];
+                    weight = parseFloat(match[2]);
+                }
+
+                weight += delta;
+                // Round to 1 decimal place
+                weight = Math.round(weight * 10) / 10;
+
+                // Construct new text
+                if (weight === 1.0) {
+                    chips[index] = content;
+                } else {
+                    chips[index] = `(${content}:${weight})`;
+                }
+
+                updateWidgetValue();
+                renderChips();
+            });
+
+            // Double click to edit
+            chip.addEventListener("dblclick", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+
+                const editInput = document.createElement("input");
+                editInput.value = chips[index]; // Use current value
+                Object.assign(editInput.style, {
+                    width: Math.max(20, textSpan.offsetWidth) + "px", // Match width roughly
+                    minWidth: "30px",
+                    border: "none",
+                    outline: "none",
+                    background: "transparent",
+                    color: "inherit",
+                    font: "inherit",
+                    padding: "0"
+                });
+
+                try {
+                    chip.replaceChild(editInput, textSpan);
+                    editInput.focus();
+                    editInput.select();
+
+                    let committed = false;
+                    const commit = () => {
+                        if (committed) return;
+                        committed = true;
+
+                        const newVal = editInput.value.trim();
+                        if (newVal) {
+                            chips[index] = newVal;
+                        } else {
+                            chips.splice(index, 1);
+                        }
+                        updateWidgetValue();
+                        renderChips();
+                    };
+
+                    editInput.addEventListener("blur", commit);
+                    editInput.addEventListener("keydown", (ev) => {
+                        if (ev.key === "Enter") {
+                            ev.preventDefault();
+                            editInput.blur();
+                        }
+                    });
+                } catch (err) {
+                    console.error("Error edit chip", err);
+                }
+            });
+
             // Drag Events
             chip.addEventListener("dragstart", (e) => {
                 e.dataTransfer.effectAllowed = "move";
@@ -193,6 +330,16 @@ function transformToChips(widget, node) {
 
             container.insertBefore(chip, input);
         });
+
+        // Ensure clearBtn is always last or absolutely positioned, actually it's absolute so order in DOM doesn't matter much for display,
+        // but for safety let's keep it appended? NO, absolute takes it out of flow. 
+        // But if we clear content using loop above, we must ensure we don't remove clearBtn if it was before input?
+        // My loop: while (container.firstChild && container.firstChild !== input && container.firstChild !== clearBtn)
+        // This assumes clearBtn is AFTER chips? 
+        // We initially appended clearBtn AFTER input? No, we appended input first.
+        // Let's re-append clearBtn to be sure it stays or check my insertion logic.
+        // renderChips uses insertBefore(chip, input). So chips are before input. 
+        // clearBtn was appended to container. So it should be last.
     }
 
     // Initialize state from widget value
@@ -210,11 +357,12 @@ function transformToChips(widget, node) {
 
     // Input Events
     input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === ",") {
+        if (e.key === "Enter") {
             e.preventDefault();
             const val = input.value.trim();
             if (val) {
-                chips.push(val);
+                const newChips = val.split(",").map(s => s.trim()).filter(s => s !== "");
+                chips.push(...newChips);
                 input.value = "";
                 updateWidgetValue();
                 renderChips();
@@ -227,16 +375,93 @@ function transformToChips(widget, node) {
         }
     });
 
+    input.addEventListener("blur", () => {
+        const val = input.value.trim();
+        if (val) {
+            const newChips = val.split(",").map(s => s.trim()).filter(s => s !== "");
+            chips.push(...newChips);
+            input.value = "";
+            updateWidgetValue();
+            renderChips();
+        }
+    });
+
     // Container dragover/drop
+    let placeholder = document.createElement("div");
+    placeholder.className = "comfy-chip-placeholder";
+
     container.addEventListener("dragover", (e) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
-        return false;
+
+        // Calculate insertion index and show placeholder
+        const chipElements = Array.from(container.getElementsByClassName("comfy-chip"));
+        // Filter out the dragged element itself if it's from this container to avoid weird jumping? 
+        // Actually, standard practice is to just calculate position.
+
+        let insertBeforeElement = null;
+        for (const chipEl of chipElements) {
+            if (chipEl.classList.contains("dragging")) continue; // Skip self
+            const rect = chipEl.getBoundingClientRect();
+
+            // If mouse is below this chip's row, this chip is technically "before" the mouse cursor in flow
+            // Note: Use a small threshold if needed, but strict comparison usually works for non-overlapping rows
+            if (e.clientY > rect.bottom) continue;
+
+            // If mouse is above this chip's row, this chip is "after" the mouse cursor
+            if (e.clientY < rect.top) {
+                insertBeforeElement = chipEl;
+                break;
+            }
+
+            // If overlapping vertically (same row), check horizontal position
+            const midPoint = rect.left + rect.width / 2;
+            if (e.clientX < midPoint) {
+                insertBeforeElement = chipEl;
+                break;
+            }
+        }
+
+        if (insertBeforeElement) {
+            container.insertBefore(placeholder, insertBeforeElement);
+        } else {
+            container.insertBefore(placeholder, input);
+        }
+    });
+
+    container.addEventListener("dragleave", (e) => {
+        // Only remove if we left the container, not just entered a child
+        if (!container.contains(e.relatedTarget)) {
+            if (placeholder.parentNode === container) {
+                container.removeChild(placeholder);
+            }
+        }
     });
 
     container.addEventListener("drop", (e) => {
         e.preventDefault();
         e.stopPropagation(); // Prevent ComfyUI from handling this drop
+
+        // Find placeholder index
+        let dropIndex = -1;
+        if (placeholder.parentNode === container) {
+            // Calculate index skipping non-chips (like placeholder itself if we iterated? no, DOM order)
+            // We need index in 'chips' array.
+            // visual children: chip, chip, placeholder, chip, input...
+            // index matches count of chips before placeholder.
+            const siblings = Array.from(container.children);
+            let count = 0;
+            for (const child of siblings) {
+                if (child === placeholder) {
+                    dropIndex = count;
+                    break;
+                }
+                if (child.classList.contains("comfy-chip") && !child.classList.contains("dragging")) {
+                    count++;
+                }
+            }
+            container.removeChild(placeholder);
+        }
 
         const rawData = e.dataTransfer.getData("text/plain");
         if (!rawData) return;
@@ -245,108 +470,96 @@ function transformToChips(widget, node) {
             const data = JSON.parse(rawData);
             if (!data.text) return;
 
-            // Determine where to drop
-            // We need to find which chip we dropped over (if any) to insert before it
-            // Simple approach: append if not over a chip
-
-            // Logic for reordering or moving
-
-            const isSameWidget = (data.sourceWidgetName === widget.name && data.sourceNodeId === node.id);
             const droppedText = data.text;
+            const isSameWidget = (data.sourceWidgetName === widget.name && data.sourceNodeId === node.id);
+            const sourceIndex = data.index;
 
-            // If dragging within the same list, we remove the original first (to avoid DUPLICATE in transition, 
-            // though standard DnD usually does move logic).
-            // But wait, if we are the destination, we are responsible for inserting.
-            // Responsibilty for REMOVING from source lies where? 
-            // 1. Source widget removes it on 'drop' success? Hard to communicate across closures.
-            // 2. We handle both if we have access? 
-            //    Global event bus or accessing the node's other widgets?
-
-            // Better approach:
-            // The drop handler modifies the DESTINATION.
-            // If the source is different, we need to access the Source Widget and remove it there.
-
+            // Handle removal from source
             let sourceWidget = null;
             if (data.sourceNodeId === node.id) {
                 sourceWidget = node.widgets.find(w => w.name === data.sourceWidgetName);
             } else {
-                // Cross-node dragging (advanced, maybe out of scope but let's see if we can support it easily)
                 const sourceNode = app.graph.getNodeById(data.sourceNodeId);
                 if (sourceNode) {
                     sourceWidget = sourceNode.widgets.find(w => w.name === data.sourceWidgetName);
                 }
             }
 
-            // Remove from source
             if (sourceWidget) {
-                // We need to parse the source widget's CURRENT value again to be safe 
-                // or assume our 'data' index is correct? 
-                // Parsing is safer.
+                // Parse source chips
+                // NOTE: If Same Widget, 'widget.value' might not have been updated if we didn't wait? 
+                // Usually it's fine.
                 let sourceChips = sourceWidget.value.split(",").map(s => s.trim()).filter(s => s !== "");
 
-                // If same widget, handling index carefully
-                if (isSameWidget) {
-                    sourceChips.splice(data.index, 1);
+                // Remove item
+                // Use sourceIndex if valid matches text, else find text
+                if (sourceChips[sourceIndex] === droppedText) {
+                    sourceChips.splice(sourceIndex, 1);
                 } else {
-                    // Start from the specified index, verify text matches
-                    if (sourceChips[data.index] === droppedText) {
-                        sourceChips.splice(data.index, 1);
-                    } else {
-                        // Fallback: find first occurrence
-                        const idx = sourceChips.indexOf(droppedText);
-                        if (idx !== -1) sourceChips.splice(idx, 1);
-                    }
+                    const idx = sourceChips.indexOf(droppedText);
+                    if (idx !== -1) sourceChips.splice(idx, 1);
                 }
 
-                // Update source widget
+                // Update source
                 const newSourceVal = sourceChips.join(", ");
                 sourceWidget.value = newSourceVal;
                 if (sourceWidget.callback) sourceWidget.callback(newSourceVal);
 
-                // If source is currently rendering chips (it should be), we need to trigger its refresh.
-                // Since 'transformToChips' creates a closure, we don't have direct access to 'renderChips' 
-                // of the other widget.
-                // WE NEED A WAY TO TRIGGER RE-RENDER.
-                // We can use a custom event on the shared styling DOM or simply:
-                // Since we updated 'widget.value', if we were observing it, it would update.
-                // Let's add an observer or simple polling to 'syncFromWidget' in 'draw' or interval?
-                // Or better: dispatch an event on the sourceWidget object itself if JS adds it?
-
-                // Hack: We can attach the refresh function to the widget object temporarily.
-                if (sourceWidget.refreshChips) {
-                    sourceWidget.refreshChips();
-                }
+                // Refresh source UI
+                if (sourceWidget.refreshChips) sourceWidget.refreshChips();
             }
 
             // Insert into destination
-            // Find insertion index based on mouse position
-            // getBoundingClientRect of children
-            let insertIndex = chips.length;
+            // If dropIndex was not found (rare), append
+            if (dropIndex === -1) dropIndex = chips.length;
 
-            // NOTE: 'chips' here is the LOCAL state of the destination widget. 
-            // If it's the SAME widget, 'chips' is NOT yet updated with the removal we just did above 
-            // (unless we refreshed rely on sourceWidget.refreshChips() which updates 'chips'?).
+            // Prepare destination chips
+            // CAUTION: If isSameWidget, 'chips' array (this.chips) is ALREADY updated effectively by 'sourceWidget.refreshChips()' above?
+            // YES. 'sourceWidget' === 'widget'. 'refreshChips' calls 'syncFromWidget' which rebuilds 'chips' from 'widget.value'.
+            // So 'chips' now lacks the item. 
+            // 'dropIndex' was calculated based on DOM *excluding* the dragging item (css class 'dragging').
+            // The DOM still HAS the dragging item until 'renderChips' is called again?
+            // Wait, sourceWidget.refreshChips() calls renderChips() which rebuilds DOM... 
+            // So the dragging item disappears mid-drop if we refesh immediately? 
+            // This might break the 'drop' event execution if the DOM node disppears?
+            // JavaScript event continuation usually works, but DOM calculations might be stale.
 
-            // If isSameWidget, we processed 'sourceWidget' which IS 'widget'.
-            // So if we called sourceWidget.refreshChips(), 'chips' IS updated (item removed).
-            // So we are inserting into the array that already has the item removed.
+            // To be safe:
+            // The 'placeholder' calculation happened in dragOver (continuous).
+            // The 'dropIndex' calculation happened at START of drop, BEFORE we touched sourceWidget.
+            // So 'dropIndex' is correct relative to the visual state "before drop".
+            // BUT, if isSameWidget, the "visual state" included the item being dragged (hidden or 0.5 opacity).
+            // Our Drop Index calculation:
+            // "count of chips before placeholder, excluding dragging item".
+            // So if we moved item from Index 0 to Index 3.
+            // Visual: [Dragging(0)], [1], [2], |Placeholder|, [3]
+            // Count before P: [1], [2] -> 2.
+            // So we insert at 2.
+            // New Array: [1], [2], [Moved(0)], [3].
+            // Seems correct.
 
-            // To find position:
-            const chipElements = Array.from(container.getElementsByClassName("comfy-chip"));
-            // Note: chipElements length might be mismatch if we just removed data but DOM not updated yet.
-            // If we called refreshChips(), DOM is updated.
+            // If we moved item from Index 3 to Index 0.
+            // Visual: |Placeholder|, [0], [1], [2], [Dragging(3)]
+            // Count before P: 0.
+            // New Array: [Moved(3)], [0], [1], [2].
+            // Correct.
 
-            // Let's calculate insert index relative to the CURRENT DOM (which reflects the state AFTER removal if same widget).
+            // The only issue is if 'refreshChips()' updates 'chips' array.
+            // We need to fetch the LATEST chips array (which has item removed) 
+            // IF we did refresh.
+            // OR we can operate on a local copy.
 
-            for (let i = 0; i < chipElements.length; i++) {
-                const rect = chipElements[i].getBoundingClientRect();
-                if (e.clientX < rect.left + rect.width / 2) {
-                    insertIndex = i;
-                    break;
-                }
+            // Since we called refreshChips(), 'chips' is updated to exclude the item.
+            // So we can just splice insert.
+
+            // We need to re-fetch chips incase refreshChips replaced the reference or updated it
+            if (isSameWidget) {
+                // chips is already updated by refreshChips()
+            } else {
+                // standard append
             }
 
-            chips.splice(insertIndex, 0, droppedText);
+            chips.splice(dropIndex, 0, droppedText);
             updateWidgetValue();
             renderChips();
 

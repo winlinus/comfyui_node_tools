@@ -16,7 +16,7 @@ styleElement.textContent = `
         align-items: center;
         margin-bottom: 5px;
         cursor: text;
-        z-index: 9999;
+        z-index: 1; /* Lower z-index to be below dialogs but above canvas */
         position: relative; /* For clear button positioning */
         padding-right: 25px; /* Make space for clear button */
     }
@@ -127,7 +127,7 @@ styleElement.textContent = `
         background-color: var(--comfy-menu-bg);
         border: 1px solid var(--border-color);
         border-radius: 4px;
-        z-index: 10001;
+        z-index: 99; /* Higher than container but reasonable */
         box-shadow: 0 4px 6px rgba(0,0,0,0.2);
         display: none;
         flex-direction: column;
@@ -172,6 +172,33 @@ fetch(tagsPath)
     .catch(err => {
         console.error("Failed to load tags.json:", err);
     });
+
+// Global Watchdog for Visibility
+// This ensures that when nodes are collapsed, the input boxes are definitely hidden.
+// Event-based handling can be flaky if drawing logic stops running (which it does when collapsed).
+const activeChipWidgets = new Set();
+
+setInterval(() => {
+    activeChipWidgets.forEach(item => {
+        const { node, container } = item;
+
+        // Safety check if node removed but cleanup missed
+        if (!node.graph) {
+            container.remove();
+            activeChipWidgets.delete(item);
+            return;
+        }
+
+        // 1. Collapse Check
+        if (node.flags && node.flags.collapsed) {
+            if (container.style.display !== "none") {
+                container.style.display = "none";
+            }
+        }
+        // Note: We don't force "flex" here because widget.draw handles showing it when appropriate
+        // (including positioning). If we forced flex here, it might show up at wrong (0,0) position.
+    });
+}, 50);
 
 app.registerExtension({
     name: "Comfy.DynamicStringTools",
@@ -376,7 +403,32 @@ function transformToChips(widget, node) {
             chip.dataset.widgetName = widget.name; // identify source widget
 
             const textSpan = document.createElement("span");
-            textSpan.textContent = chipText;
+
+            // Format text to show Chinese if available
+            let displayText = chipText;
+            let baseTag = chipText;
+            let weightSuffix = "";
+            let prefix = "";
+
+            // Handle weight format (tag:1.1)
+            const weightMatch = chipText.match(/^(\()(.+)(:[0-9]*\.?[0-9]+)(\))$/);
+            if (weightMatch) {
+                prefix = weightMatch[1];
+                baseTag = weightMatch[2];
+                weightSuffix = weightMatch[3] + weightMatch[4];
+            }
+
+            // Lookup translation
+            if (availableTags && availableTags.length > 0) {
+                const tagData = availableTags.find(t => t.en === baseTag);
+                if (tagData && tagData.zh) {
+                    // Format: English (Chinese)
+                    // If weighted: (English (Chinese):1.1)
+                    displayText = `${prefix}${baseTag} <span style="opacity:0.6; font-size:0.9em">(${tagData.zh})</span>${weightSuffix}`;
+                }
+            }
+
+            textSpan.innerHTML = displayText; // Use innerHTML for styling
             chip.appendChild(textSpan);
 
             const removeBtn = document.createElement("span");
@@ -886,13 +938,23 @@ function transformToChips(widget, node) {
     // 1. Initial Style
     container.style.position = "absolute";
     // container.style.display = "none"; // Initially hidden until computed
-    document.body.appendChild(container);
+    document.body.appendChild(container); // Use body to ensure it's on top of everything
+
+    // Track for global visibility loop
+    const widgetEntry = { node, container };
+    activeChipWidgets.add(widgetEntry);
 
     const originalOnRemove = node.onRemoved;
     node.onRemoved = function () {
         if (originalOnRemove) originalOnRemove.apply(this, arguments);
         container.remove();
+        activeChipWidgets.delete(widgetEntry);
     };
+
+    // Note: We removed the centralized onCollapse hook in favor of the global watchdog loop
+    // which is more robust for "stuck" elements.
+
+
 
     // We need to manage visibility/position
     const updatePosition = () => {

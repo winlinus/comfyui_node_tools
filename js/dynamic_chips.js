@@ -115,10 +115,63 @@ styleElement.textContent = `
         from { transform: scale(0); width: 0; margin: 0; opacity: 0; }
         to { transform: scale(1); width: 60px; margin: 0 4px; opacity: 1; }
     }
+
+    /* Autocomplete Styles */
+    .comfy-autocomplete-container {
+        position: absolute;
+        bottom: 100%;
+        left: 0;
+        min-width: 200px;
+        max-height: 200px;
+        overflow-y: auto;
+        background-color: var(--comfy-menu-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        z-index: 10001;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        display: none;
+        flex-direction: column;
+    }
+
+    .comfy-autocomplete-item {
+        padding: 5px 10px;
+        cursor: pointer;
+        color: var(--fg-color);
+        font-size: 12px;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .comfy-autocomplete-item:last-child {
+        border-bottom: none;
+    }
+
+    .comfy-autocomplete-item:hover, .comfy-autocomplete-item.selected {
+        background-color: var(--primary-color, #2a81f6);
+        color: white;
+    }
+    
+    .comfy-autocomplete-item .sub-text {
+        font-size: 0.85em;
+        opacity: 0.7;
+        margin-left: 5px;
+    }
 `;
 document.head.appendChild(styleElement);
 
 console.log("Loading DynamicStringTools extension...");
+
+// Load tags
+let availableTags = [];
+const tagsPath = new URL("./tags.json", import.meta.url).href; // Construct absolute URL relative to this script
+fetch(tagsPath)
+    .then(response => response.json())
+    .then(data => {
+        availableTags = data;
+        console.log(`Loaded ${availableTags.length} tags for autocomplete.`);
+    })
+    .catch(err => {
+        console.error("Failed to load tags.json:", err);
+    });
 
 app.registerExtension({
     name: "Comfy.DynamicStringTools",
@@ -175,7 +228,7 @@ function transformToChips(widget, node) {
 
     const input = document.createElement("input");
     input.className = "comfy-chip-input";
-    input.placeholder = "Add tag...";
+    input.placeholder = "Add tags... (Type for suggestion)";
 
     container.appendChild(input);
 
@@ -197,7 +250,104 @@ function transformToChips(widget, node) {
     };
     container.appendChild(clearBtn);
 
+    container.appendChild(clearBtn);
+
+    // Autocomplete Container
+    const autocompleteDropdown = document.createElement("div");
+    autocompleteDropdown.className = "comfy-autocomplete-container";
+    container.appendChild(autocompleteDropdown);
+
+    let selectedIndex = -1;
+    let visibleTags = [];
+
+    function closeAutocomplete() {
+        autocompleteDropdown.style.display = "none";
+        selectedIndex = -1;
+        visibleTags = [];
+    }
+
+    function selectAutocompleteItem(index) {
+        if (index >= 0 && index < visibleTags.length) {
+            const tag = visibleTags[index];
+            // Create chip with English name
+            const newChipText = tag.en;
+            chips.push(newChipText);
+            input.value = "";
+            updateWidgetValue();
+            renderChips();
+            closeAutocomplete();
+            input.focus();
+        }
+    }
+
+    function renderAutocomplete(filterText) {
+        if (!filterText || availableTags.length === 0) {
+            closeAutocomplete();
+            return;
+        }
+
+        const lowerFilter = filterText.toLowerCase();
+        // Filter logic: match en or zh
+        visibleTags = availableTags.filter(tag => {
+            const enMatch = tag.en.toLowerCase().includes(lowerFilter);
+            const zhMatch = tag.zh && tag.zh.includes(filterText); // case sensitive for Chinese usually fine, but includes is enough
+            return enMatch || zhMatch;
+        }).slice(0, 20); // Limit results
+
+        if (visibleTags.length === 0) {
+            closeAutocomplete();
+            return;
+        }
+
+        autocompleteDropdown.innerHTML = "";
+        visibleTags.forEach((tag, index) => {
+            const item = document.createElement("div");
+            item.className = "comfy-autocomplete-item";
+            // Display: en (zh)
+            const zhText = tag.zh ? ` (${tag.zh})` : "";
+            const catText = tag.cat ? ` <span style='opacity:0.5; font-size:0.8em'>[${tag.cat}]</span>` : "";
+
+            item.innerHTML = `<span>${tag.en}${zhText}</span>${catText}`; // Use innerHTML for styling sub-text if needed
+
+            item.onclick = (e) => {
+                e.stopPropagation();
+                selectAutocompleteItem(index);
+            };
+
+            if (index === selectedIndex) {
+                item.classList.add("selected");
+            }
+
+            autocompleteDropdown.appendChild(item);
+        });
+
+        autocompleteDropdown.style.display = "flex";
+
+        // Position it? It is absolute inside container (relative).
+        // container is: position relative.
+        // We set .comfy-autocomplete-container { bottom: 100%; left: 0; } in CSS.
+        // That puts it ABOVE the input/chips.
+        // Let's adjust based on input position? 
+        // The container wraps everything. So it shows up attached to the main box.
+        // That's fine.
+    }
+
+    function updateSelection() {
+        const items = autocompleteDropdown.children;
+        for (let i = 0; i < items.length; i++) {
+            if (i === selectedIndex) {
+                items[i].classList.add("selected");
+                // Ensure visible
+                // block: 'nearest' ensures it scrolls just enough to be visible at top or bottom
+                items[i].scrollIntoView({ block: "nearest" });
+            } else {
+                items[i].classList.remove("selected");
+            }
+        }
+    }
+
     // Helper to sync value BACK to the widget
+
     function updateWidgetValue() {
         const newValue = chips.join(", ");
         widget.value = newValue;
@@ -397,10 +547,119 @@ function transformToChips(widget, node) {
     // Initial sync
     syncFromWidget();
 
+    // Helper to scroll the selected autocomplete item into view and update classes
+    function updateSelection() {
+        const items = autocompleteDropdown.children;
+        for (let i = 0; i < items.length; i++) {
+            if (i === selectedIndex) {
+                items[i].classList.add("selected");
+                items[i].scrollIntoView({ block: "nearest", inline: "nearest" });
+            } else {
+                items[i].classList.remove("selected");
+            }
+        }
+    }
+
     // Input Events
     input.addEventListener("keydown", (e) => {
+        if (autocompleteDropdown.style.display === "flex") {
+            if (e.key === "ArrowDown") {
+                e.preventDefault();
+                // If selectedIndex is -1 (start), goes to 0.
+                selectedIndex = (selectedIndex + 1) % visibleTags.length;
+                updateSelection();
+                return;
+            } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                if (selectedIndex === -1) selectedIndex = visibleTags.length - 1;
+                else selectedIndex = (selectedIndex - 1 + visibleTags.length) % visibleTags.length;
+                updateSelection();
+                return;
+            } else if (e.key === "Enter" || e.key === "Tab") {
+                if (selectedIndex >= 0) {
+                    e.preventDefault();
+                    selectAutocompleteItem(selectedIndex);
+                    return;
+                }
+            } else if (e.key === "Escape") {
+                e.preventDefault();
+                closeAutocomplete();
+                return;
+            }
+        }
+
         if (e.key === "Enter") {
             e.preventDefault();
+            const val = input.value.trim();
+            if (val) {
+                // If autocomplete open and nothing selected, use input value?
+                // Or if user typed "girl" and "1girl" is top result but not selected, do we auto-pick?
+                // Let's stick to explicit: if no autocomplete selection, use typed text.
+
+                const newChips = val.split(",").map(s => s.trim()).filter(s => s !== "");
+                chips.push(...newChips);
+                input.value = "";
+                updateWidgetValue();
+                renderChips();
+                closeAutocomplete();
+            }
+        } else if (e.key === "Backspace" && input.value === "" && chips.length > 0) {
+            // Remove last chip on backspace if input empty
+            chips.pop();
+            updateWidgetValue();
+            renderChips();
+            closeAutocomplete();
+        }
+    });
+
+    input.addEventListener("input", (e) => {
+        const val = input.value.trim();
+        // If user types comma, create chip immediately
+        if (val.includes(",")) {
+            const parts = val.split(",");
+            // The last part might be the start of a new tag, keep it?
+            // Usually ComfyUI standard behavior is comma separates.
+            // We'll take all parts except last one if it's empty? 
+            // Logic: "tag1," -> ["tag1", ""] -> create tag1, clear input.
+            // "tag1, tag2" -> create tag1, input becomes " tag2"?
+            // Let's simplify: split all, if ends with comma or enter, consume all.
+            // But 'input' event fires per char.
+
+            // If comma is typed:
+            // 1. consume everything before comma
+            // 2. clear input
+            // 3. if anything after comma, put it back in input?
+            // Note: simpler to just use specific key handler or simple split.
+            // Let's just create chips for everything before the last comma.
+            // Actually, the original code handled Enter. 
+            // Let's let the user type.
+            // We only trigger autocomplete on text.
+
+            // Check if comma exists
+            if (input.value.includes(",")) {
+                const parts = input.value.split(",");
+                const toAdd = parts.slice(0, parts.length - 1).map(s => s.trim()).filter(s => s);
+                if (toAdd.length > 0) {
+                    chips.push(...toAdd);
+                    updateWidgetValue();
+                    renderChips();
+                }
+                input.value = parts[parts.length - 1]; // Keep last part
+                closeAutocomplete();
+                if (input.value.trim()) renderAutocomplete(input.value.trim());
+                return;
+            }
+        }
+
+        selectedIndex = 0; // Reset selection on new input
+        renderAutocomplete(val);
+    });
+
+    input.addEventListener("blur", () => {
+        // Delay closing to allow click events on autocomplete items to fire
+        setTimeout(() => {
+            closeAutocomplete();
+            // Original blur logic: create chip from remaining text?
             const val = input.value.trim();
             if (val) {
                 const newChips = val.split(",").map(s => s.trim()).filter(s => s !== "");
@@ -409,23 +668,7 @@ function transformToChips(widget, node) {
                 updateWidgetValue();
                 renderChips();
             }
-        } else if (e.key === "Backspace" && input.value === "" && chips.length > 0) {
-            // Remove last chip on backspace if input empty
-            chips.pop();
-            updateWidgetValue();
-            renderChips();
-        }
-    });
-
-    input.addEventListener("blur", () => {
-        const val = input.value.trim();
-        if (val) {
-            const newChips = val.split(",").map(s => s.trim()).filter(s => s !== "");
-            chips.push(...newChips);
-            input.value = "";
-            updateWidgetValue();
-            renderChips();
-        }
+        }, 200);
     });
 
     // Container dragover/drop

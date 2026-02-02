@@ -167,6 +167,70 @@ styleElement.textContent = `
         color: white;
     }
     
+    /* Custom Prompt Modal */
+    .comfy-custom-prompt-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 20000;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+    .comfy-custom-prompt-box {
+        background: var(--comfy-menu-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 20px;
+        min-width: 300px;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+    }
+    .comfy-custom-prompt-title {
+        font-weight: bold;
+        color: var(--fg-color);
+        font-size: 14px;
+    }
+    .comfy-custom-prompt-input {
+        background: var(--comfy-input-bg);
+        border: 1px solid var(--border-color);
+        color: var(--fg-color);
+        border-radius: 4px;
+        padding: 8px;
+        outline: none;
+    }
+    .comfy-custom-prompt-input:focus {
+        border-color: var(--primary-color, #2a81f6);
+    }
+    .comfy-custom-prompt-buttons {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+    }
+    .comfy-custom-prompt-btn {
+        padding: 5px 15px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+        border: none;
+    }
+    .comfy-custom-prompt-btn.cancel {
+        background: var(--comfy-input-bg);
+        color: var(--fg-color);
+    }
+    .comfy-custom-prompt-btn.confirm {
+        background: var(--primary-color, #2a81f6);
+        color: white;
+    }
+    .comfy-custom-prompt-btn:hover {
+        opacity: 0.9;
+    }
+    
     .comfy-autocomplete-item .sub-text {
         font-size: 0.85em;
         opacity: 0.7;
@@ -367,7 +431,7 @@ function transformToChips(widget, node) {
     // Template Button & Menu
     const templateBtn = document.createElement("div");
     templateBtn.className = "comfy-chip-template-btn";
-    templateBtn.innerHTML = "💾"; // Floppy disk icon
+    templateBtn.innerHTML = "📑"; // Bookmark tabs icon
     templateBtn.title = "Manage Templates";
 
     const templateMenu = document.createElement("div");
@@ -405,6 +469,67 @@ function transformToChips(widget, node) {
         }
     };
 
+    // Custom Prompt Helper
+    function showCustomPrompt(message, defaultValue = "") {
+        return new Promise((resolve) => {
+            const overlay = document.createElement("div");
+            overlay.className = "comfy-custom-prompt-overlay";
+
+            const box = document.createElement("div");
+            box.className = "comfy-custom-prompt-box";
+
+            const title = document.createElement("div");
+            title.className = "comfy-custom-prompt-title";
+            title.textContent = message;
+
+            const inputEl = document.createElement("input");
+            inputEl.className = "comfy-custom-prompt-input";
+            inputEl.value = defaultValue;
+
+            const btnContainer = document.createElement("div");
+            btnContainer.className = "comfy-custom-prompt-buttons";
+
+            const cancelBtn = document.createElement("button");
+            cancelBtn.className = "comfy-custom-prompt-btn cancel";
+            cancelBtn.textContent = "Cancel";
+
+            const confirmBtn = document.createElement("button");
+            confirmBtn.className = "comfy-custom-prompt-btn confirm";
+            confirmBtn.textContent = "Save";
+
+            const close = (val) => {
+                document.body.removeChild(overlay);
+                resolve(val);
+            };
+
+            cancelBtn.onclick = () => close(null);
+            confirmBtn.onclick = () => close(inputEl.value.trim());
+
+            inputEl.onkeydown = (e) => {
+                if (e.key === "Enter") confirmBtn.click();
+                if (e.key === "Escape") cancelBtn.click();
+            };
+
+            // Prevent close on box click
+            box.onclick = (e) => e.stopPropagation();
+            // Close on overlay click
+            overlay.onclick = (e) => {
+                if (e.target === overlay) cancelBtn.click();
+            }
+
+            btnContainer.appendChild(cancelBtn);
+            btnContainer.appendChild(confirmBtn);
+
+            box.appendChild(title);
+            box.appendChild(inputEl);
+            box.appendChild(btnContainer);
+            overlay.appendChild(box);
+
+            document.body.appendChild(overlay);
+            inputEl.focus();
+        });
+    }
+
     // Document listener removed from here (moved to global scope to handle all instances)
 
     async function refreshTemplateList() {
@@ -417,7 +542,8 @@ function transformToChips(widget, node) {
         saveItem.innerHTML = "<span>+ Save as Template...</span>";
         saveItem.onclick = async (e) => {
             e.stopPropagation();
-            const name = prompt("Enter template name:");
+            // Use custom prompt instead of native prompt()
+            const name = await showCustomPrompt("Enter template name:");
             if (name) {
                 await saveTemplate(name);
                 refreshTemplateList();

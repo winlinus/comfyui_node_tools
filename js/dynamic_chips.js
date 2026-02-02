@@ -1,4 +1,21 @@
 import { app } from "../../scripts/app.js";
+import { api } from "../../scripts/api.js";
+
+// Global tracking for open menus to simulate "single open" behavior
+let activeTemplateMenu = null;
+const closeActiveMenu = () => {
+    if (activeTemplateMenu && activeTemplateMenu.close) {
+        activeTemplateMenu.close();
+        activeTemplateMenu = null;
+    }
+};
+
+// Close when clicking document
+document.addEventListener("click", (e) => {
+    if (activeTemplateMenu && !activeTemplateMenu.element.contains(e.target) && e.target !== activeTemplateMenu.trigger) {
+        closeActiveMenu();
+    }
+});
 
 // Utility to inject styles
 const styleElement = document.createElement("style");
@@ -155,6 +172,76 @@ styleElement.textContent = `
         opacity: 0.7;
         margin-left: 5px;
     }
+
+    /* Template Menu Styles */
+    .comfy-chip-template-btn {
+        position: absolute;
+        top: 2px;
+        right: 22px; /* Next to clear btn */
+        cursor: pointer;
+        color: #888;
+        font-size: 14px;
+        width: 16px;
+        height: 16px;
+        line-height: 14px;
+        text-align: center;
+        border-radius: 50%;
+        background: rgba(0,0,0,0.1);
+        z-index: 1000;
+        display: block !important; 
+    }
+    .comfy-chip-template-btn:hover {
+        color: var(--primary-color, #2a81f6);
+        background: rgba(0,0,0,0.2);
+    }
+    
+    .comfy-template-menu {
+        position: absolute;
+        top: 20px;
+        right: 0;
+        min-width: 150px;
+        background: var(--comfy-menu-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        z-index: 10001;
+        display: none;
+        flex-direction: column;
+        overflow: hidden;
+    }
+    
+    .comfy-template-menu-item {
+        padding: 5px 10px;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid var(--border-color);
+        font-size: 12px;
+        color: var(--fg-color);
+    }
+    .comfy-template-menu-item:hover {
+        background: var(--comfy-input-bg);
+    }
+    .comfy-template-menu-item.action {
+        font-weight: bold;
+        color: var(--primary-color, #2a81f6);
+    }
+    .comfy-template-menu-item.empty {
+        font-style: italic;
+        opacity: 0.6;
+        cursor: default;
+    }
+    .comfy-template-delete {
+        color: #ff6b6b;
+        font-weight: bold;
+        padding: 0 5px;
+        border-radius: 4px;
+    }
+    .comfy-template-delete:hover {
+        background: rgba(255,0,0,0.1);
+        color: #ff0000;
+    }
 `;
 document.head.appendChild(styleElement);
 
@@ -277,7 +364,177 @@ function transformToChips(widget, node) {
     };
     container.appendChild(clearBtn);
 
-    container.appendChild(clearBtn);
+    // Template Button & Menu
+    const templateBtn = document.createElement("div");
+    templateBtn.className = "comfy-chip-template-btn";
+    templateBtn.innerHTML = "💾"; // Floppy disk icon
+    templateBtn.title = "Manage Templates";
+
+    const templateMenu = document.createElement("div");
+    templateMenu.className = "comfy-template-menu";
+
+    container.appendChild(templateBtn);
+    container.appendChild(templateMenu);
+
+    const closeMenu = () => {
+        templateMenu.style.display = "none";
+        container.style.zIndex = ""; // Reset to CSS default
+    };
+
+    templateBtn.onclick = (e) => {
+        e.stopPropagation();
+
+        // If this menu is already open, close it
+        if (templateMenu.style.display === "flex") {
+            closeMenu();
+            activeTemplateMenu = null;
+        } else {
+            // Close any other open menu
+            closeActiveMenu();
+
+            // Open this menu
+            container.style.zIndex = "1005"; // Elevate above other widgets
+            refreshTemplateList();
+
+            // Register as active
+            activeTemplateMenu = {
+                element: templateMenu,
+                trigger: templateBtn,
+                close: closeMenu
+            };
+        }
+    };
+
+    // Document listener removed from here (moved to global scope to handle all instances)
+
+    async function refreshTemplateList() {
+        templateMenu.innerHTML = "";
+        templateMenu.style.display = "flex";
+
+        // Save Option
+        const saveItem = document.createElement("div");
+        saveItem.className = "comfy-template-menu-item action";
+        saveItem.innerHTML = "<span>+ Save as Template...</span>";
+        saveItem.onclick = async (e) => {
+            e.stopPropagation();
+            const name = prompt("Enter template name:");
+            if (name) {
+                await saveTemplate(name);
+                refreshTemplateList();
+            }
+        };
+        templateMenu.appendChild(saveItem);
+
+        // Load Templates
+        try {
+            // New Global API: no query params needed
+            const response = await api.fetchApi("/string_tools/get_templates");
+            const templates = await response.json();
+
+            const keys = Object.keys(templates);
+            if (keys.length === 0) {
+                const emptyItem = document.createElement("div");
+                emptyItem.className = "comfy-template-menu-item empty";
+                emptyItem.innerText = "No saved templates";
+                templateMenu.appendChild(emptyItem);
+            } else {
+                keys.forEach(name => {
+                    const item = document.createElement("div");
+                    item.className = "comfy-template-menu-item";
+                    item.innerHTML = `<span>${name}</span>`;
+
+                    const deleteBtn = document.createElement("span");
+                    deleteBtn.className = "comfy-template-delete";
+                    deleteBtn.innerText = "×";
+                    deleteBtn.title = "Delete Template";
+                    deleteBtn.onclick = async (ev) => {
+                        ev.stopPropagation();
+                        if (confirm(`Delete template "${name}"?`)) {
+                            await deleteTemplate(name);
+                            refreshTemplateList();
+                        }
+                    };
+
+                    item.appendChild(deleteBtn);
+
+                    item.onclick = (ev) => {
+                        if (ev.target !== deleteBtn) {
+                            loadTemplateContent(templates[name]);
+                            // Close menu after loading
+                            closeMenu();
+                            activeTemplateMenu = null;
+                        }
+                    };
+
+                    templateMenu.appendChild(item);
+                });
+            }
+        } catch (err) {
+            console.error("Error fetching templates", err);
+            const errorItem = document.createElement("div");
+            errorItem.className = "comfy-template-menu-item empty";
+            errorItem.innerText = "Error loading templates";
+            templateMenu.appendChild(errorItem);
+        }
+    }
+
+    async function saveTemplate(name) {
+        // Combine existing chips with any pending text in the input
+        let finalContent = chips.join(", ");
+        const pendingInput = input.value.trim();
+        if (pendingInput) {
+            if (finalContent) finalContent += ", " + pendingInput;
+            else finalContent = pendingInput;
+        }
+
+        console.log(`[DynamicChips] Saving template '${name}':`, finalContent);
+
+        try {
+            const response = await api.fetchApi("/string_tools/save_template", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    // Global templates: no IDs needed
+                    template_name: name,
+                    content: finalContent
+                })
+            });
+            if (response.status !== 200) {
+                throw new Error("Server error: " + response.status);
+            }
+        } catch (err) {
+            alert("Failed to save template: " + err);
+            console.error(err);
+            throw err;
+        }
+    }
+
+    async function deleteTemplate(name) {
+        try {
+            const response = await api.fetchApi("/string_tools/delete_template", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    template_name: name
+                })
+            });
+            if (response.status !== 200) {
+                throw new Error("Server error: " + response.status);
+            }
+        } catch (err) {
+            alert("Failed to delete template: " + err);
+        }
+    }
+
+    function loadTemplateContent(content) {
+        if (content) {
+            chips = content.split(",").map(s => s.trim()).filter(s => s !== "");
+        } else {
+            chips = [];
+        }
+        updateWidgetValue();
+        renderChips();
+    }
 
     // Autocomplete Container
     const autocompleteDropdown = document.createElement("div");

@@ -434,6 +434,120 @@ function transformToChips(widget, node) {
     templateBtn.innerHTML = "📑"; // Bookmark tabs icon
     templateBtn.title = "Manage Templates";
 
+    // ----------------------------------------------------
+    // Swap Buttons
+    // ----------------------------------------------------
+    const buttonStyle = `
+        position: absolute;
+        top: 22px; 
+        right: 2px;
+        width: 16px;
+        height: 16px;
+        line-height: 14px;
+        text-align: center;
+        cursor: pointer;
+        color: #888;
+        font-size: 14px;
+        background: rgba(0,0,0,0.1);
+        border-radius: 50%;
+        z-index: 1000;
+        display: none; /* Show only when hovering container? Or always? */
+    `;
+
+    // Improved layout: stack clear, template, up, down vertically?
+    // Or put Up/Down on the far right?
+    // The current CSS puts clearBtn at top: 2px, right: 2px.
+    // templateBtn at top: 2px, right: 22px.
+    // Let's put Arrow buttons below them.
+
+    // Move Up Button
+    const moveUpBtn = document.createElement("div");
+    moveUpBtn.className = "comfy-chip-btn-up";
+    moveUpBtn.innerHTML = "↑";
+    moveUpBtn.title = "Swap with the box above";
+    moveUpBtn.style.cssText = buttonStyle + "top: 22px; right: 2px;"; // Below clear btn
+
+    // Move Down Button
+    const moveDownBtn = document.createElement("div");
+    moveDownBtn.className = "comfy-chip-btn-down";
+    moveDownBtn.innerHTML = "↓";
+    moveDownBtn.title = "Swap with the box below";
+    moveDownBtn.style.cssText = buttonStyle + "top: 22px; right: 22px;"; // Below template btn?
+
+    // Adjust positions:
+    // Row 1: Template (R:22), Clear (R:2)
+    // Row 2: Down (R:22), Up (R:2)  <-- Wait, Up should be above Down visually if stacked, but here they are side-by-side?
+    // Let's stack them vertically on the right edge if possible?
+    // Or just side by side.
+    // Let's put them: 
+    // Template: top 2, right 22
+    // Clear: top 2, right 2
+    // Up: top 22, right 2
+    // Down: top 22, right 22
+
+    moveUpBtn.onclick = (e) => {
+        e.stopPropagation();
+        swapWidget(-1);
+    };
+
+    moveDownBtn.onclick = (e) => {
+        e.stopPropagation();
+        swapWidget(1);
+    };
+
+    // Helper to find neighbor widget and swap
+    function swapWidget(direction) {
+        // widget.name is "string_N"
+        // Parse N
+        const match = widget.name.match(/string_(\d+)/);
+        if (!match) return;
+        const index = parseInt(match[1]);
+        const targetIndex = index + direction;
+
+        if (targetIndex < 1 || targetIndex > 10) return; // Out of bounds assuming 1-10
+
+        const targetName = `string_${targetIndex}`;
+        const targetWidget = node.widgets.find(w => w.name === targetName);
+
+        if (targetWidget) {
+            // Swap values
+            const myValue = widget.value;
+            const targetValue = targetWidget.value;
+
+            widget.value = targetValue;
+            targetWidget.value = myValue;
+
+            // Trigger updates
+            if (widget.callback) widget.callback(widget.value);
+            if (targetWidget.callback) targetWidget.callback(targetWidget.value);
+
+            // Refresh Chips UI
+            if (widget.refreshChips) widget.refreshChips();
+            if (targetWidget.refreshChips) targetWidget.refreshChips();
+
+            app.graph.setDirtyCanvas(true, true);
+        }
+    }
+
+    // Only show buttons if neighbor exists
+    // We can check on hover or init.
+    // Let's check init.
+    const myIdx = parseInt(widget.name.split("_")[1]);
+    if (myIdx > 1) container.appendChild(moveUpBtn);
+    if (myIdx < 10) container.appendChild(moveDownBtn);
+
+    // Improve visibility on hover
+    container.onmouseenter = () => {
+        moveUpBtn.style.display = (myIdx > 1) ? "block" : "none";
+        moveDownBtn.style.display = (myIdx < 10) ? "block" : "none";
+    };
+    container.onmouseleave = () => {
+        moveUpBtn.style.display = "none";
+        moveDownBtn.style.display = "none";
+    };
+
+    // ----------------------------------------------------
+
     const templateMenu = document.createElement("div");
     templateMenu.className = "comfy-template-menu";
 
@@ -469,8 +583,9 @@ function transformToChips(widget, node) {
         }
     };
 
-    // Custom Prompt Helper
-    function showCustomPrompt(message, defaultValue = "") {
+    // Custom Prompt Helper with extra fields if needed
+    // Modified to support Category input
+    function showTemplateSaveDialog(defaultValue = "") {
         return new Promise((resolve) => {
             const overlay = document.createElement("div");
             overlay.className = "comfy-custom-prompt-overlay";
@@ -480,11 +595,33 @@ function transformToChips(widget, node) {
 
             const title = document.createElement("div");
             title.className = "comfy-custom-prompt-title";
-            title.textContent = message;
+            title.textContent = "Save Template";
 
+            // Category Input (ComboBox like)
+            const catContainer = document.createElement("div");
+            catContainer.innerHTML = "<label style='font-size:12px; color:#aaa; display:block; margin-bottom:4px;'>Category (Optional)</label>";
+            const catInput = document.createElement("input");
+            catInput.className = "comfy-custom-prompt-input";
+            catInput.placeholder = "e.g. Characters / Styles";
+            catInput.style.width = "100%";
+            catInput.setAttribute("list", "comfy-template-categories-list"); // Datalist for suggestions
+
+            const datalist = document.createElement("datalist");
+            datalist.id = "comfy-template-categories-list";
+            // Populate datalist with existing categories? (Requires we know them, we can fetch get_templates first)
+            // We will fetch inside this function or pass it in.
+
+            catContainer.appendChild(catInput);
+            catContainer.appendChild(datalist);
+
+            // Name Input
+            const nameContainer = document.createElement("div");
+            nameContainer.innerHTML = "<label style='font-size:12px; color:#aaa; display:block; margin-bottom:4px;'>Template Name</label>";
             const inputEl = document.createElement("input");
             inputEl.className = "comfy-custom-prompt-input";
             inputEl.value = defaultValue;
+            inputEl.style.width = "100%";
+            nameContainer.appendChild(inputEl);
 
             const btnContainer = document.createElement("div");
             btnContainer.className = "comfy-custom-prompt-buttons";
@@ -497,17 +634,37 @@ function transformToChips(widget, node) {
             confirmBtn.className = "comfy-custom-prompt-btn confirm";
             confirmBtn.textContent = "Save";
 
+            // Load types for datalist
+            api.fetchApi("/string_tools/get_templates").then(r => r.json()).then(templates => {
+                const cats = new Set();
+                Object.keys(templates).forEach(k => {
+                    if (typeof templates[k] === "object") cats.add(k);
+                });
+                cats.forEach(c => {
+                    const opt = document.createElement("option");
+                    opt.value = c;
+                    datalist.appendChild(opt);
+                });
+            });
+
             const close = (val) => {
                 document.body.removeChild(overlay);
                 resolve(val);
             };
 
             cancelBtn.onclick = () => close(null);
-            confirmBtn.onclick = () => close(inputEl.value.trim());
+            confirmBtn.onclick = () => close({
+                name: inputEl.value.trim(),
+                category: catInput.value.trim()
+            });
 
+            // Enter key on name saves
             inputEl.onkeydown = (e) => {
                 if (e.key === "Enter") confirmBtn.click();
                 if (e.key === "Escape") cancelBtn.click();
+            };
+            catInput.onkeydown = (e) => {
+                if (e.key === "Enter") inputEl.focus(); // Enter on cat goes to name
             };
 
             // Prevent close on box click
@@ -520,17 +677,30 @@ function transformToChips(widget, node) {
             btnContainer.appendChild(cancelBtn);
             btnContainer.appendChild(confirmBtn);
 
-            box.appendChild(title);
-            box.appendChild(inputEl);
+            box.appendChild(catContainer);
+            box.appendChild(nameContainer);
             box.appendChild(btnContainer);
             overlay.appendChild(box);
 
             document.body.appendChild(overlay);
-            inputEl.focus();
+            catInput.focus(); // Focus category first
         });
     }
 
-    // Document listener removed from here (moved to global scope to handle all instances)
+    // Generic Custom Prompt (kept for compatibility or simple reuse)
+    function showCustomPrompt(message, defaultValue = "") {
+        // ... kept if needed, but we used custom above for save.
+        // Actually, let's keep it for other simple prompts if any.
+        // Or we can just reuse the logic from above but simplified.
+        return new Promise((resolve) => {
+            const overlay = document.createElement("div");
+            // ... simplified version ...
+            // For brevity, skipping full recreation as we only used it for Save Name before.
+            // We replaced save with showTemplateSaveDialog.
+            resolve(null);
+        });
+    }
+
 
     async function refreshTemplateList() {
         templateMenu.innerHTML = "";
@@ -542,10 +712,9 @@ function transformToChips(widget, node) {
         saveItem.innerHTML = "<span>+ Save as Template...</span>";
         saveItem.onclick = async (e) => {
             e.stopPropagation();
-            // Use custom prompt instead of native prompt()
-            const name = await showCustomPrompt("Enter template name:");
-            if (name) {
-                await saveTemplate(name);
+            const result = await showTemplateSaveDialog();
+            if (result && result.name) {
+                await saveTemplate(result.name, result.category);
                 refreshTemplateList();
             }
         };
@@ -553,46 +722,93 @@ function transformToChips(widget, node) {
 
         // Load Templates
         try {
-            // New Global API: no query params needed
             const response = await api.fetchApi("/string_tools/get_templates");
             const templates = await response.json();
 
-            const keys = Object.keys(templates);
+            // Function to render items recursively or specific structure
+            // We only support 1 level of nesting for simplicity: Root Items vs Categories (with items)
+
+            const renderItem = (name, content, containerDiv, category = null) => {
+                const item = document.createElement("div");
+                item.className = "comfy-template-menu-item";
+                item.style.paddingLeft = category ? "20px" : "10px";
+                item.innerHTML = `<span>${name}</span>`;
+
+                const deleteBtn = document.createElement("span");
+                deleteBtn.className = "comfy-template-delete";
+                deleteBtn.innerText = "×";
+                deleteBtn.title = "Delete Template";
+                deleteBtn.onclick = async (ev) => {
+                    ev.stopPropagation();
+                    if (confirm(`Delete template "${name}"?`)) {
+                        await deleteTemplate(name, category);
+                        refreshTemplateList();
+                    }
+                };
+
+                item.appendChild(deleteBtn);
+
+                item.onclick = (ev) => {
+                    if (ev.target !== deleteBtn) {
+                        loadTemplateContent(content);
+                        closeMenu();
+                        activeTemplateMenu = null;
+                    }
+                };
+                containerDiv.appendChild(item);
+            };
+
+            const renderCategory = (catName, items, containerDiv) => {
+                const catHeader = document.createElement("div");
+                catHeader.className = "comfy-template-menu-item";
+                catHeader.style.fontWeight = "bold";
+                catHeader.style.background = "rgba(255,255,255,0.05)";
+                // Folder icon
+                catHeader.innerHTML = `<span>📂 ${catName}</span>`;
+
+                // Toggle expansion? For now just always expanded or toggle list
+
+                const catList = document.createElement("div");
+                catList.style.display = "none"; // Default collapsed? or open? Let's default collapsed.
+
+                catHeader.onclick = (e) => {
+                    e.stopPropagation();
+                    const isHidden = catList.style.display === "none";
+                    catList.style.display = isHidden ? "block" : "none";
+                    catHeader.style.background = isHidden ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.05)";
+                };
+
+                containerDiv.appendChild(catHeader);
+                containerDiv.appendChild(catList);
+
+                Object.keys(items).forEach(itemName => {
+                    renderItem(itemName, items[itemName], catList, catName);
+                });
+            };
+
+            const keys = Object.keys(templates).sort((a, b) => {
+                // Folders first
+                const isObjA = typeof templates[a] === "object";
+                const isObjB = typeof templates[b] === "object";
+                if (isObjA && !isObjB) return -1;
+                if (!isObjA && isObjB) return 1;
+                return a.localeCompare(b);
+            });
+
             if (keys.length === 0) {
                 const emptyItem = document.createElement("div");
                 emptyItem.className = "comfy-template-menu-item empty";
                 emptyItem.innerText = "No saved templates";
                 templateMenu.appendChild(emptyItem);
             } else {
-                keys.forEach(name => {
-                    const item = document.createElement("div");
-                    item.className = "comfy-template-menu-item";
-                    item.innerHTML = `<span>${name}</span>`;
-
-                    const deleteBtn = document.createElement("span");
-                    deleteBtn.className = "comfy-template-delete";
-                    deleteBtn.innerText = "×";
-                    deleteBtn.title = "Delete Template";
-                    deleteBtn.onclick = async (ev) => {
-                        ev.stopPropagation();
-                        if (confirm(`Delete template "${name}"?`)) {
-                            await deleteTemplate(name);
-                            refreshTemplateList();
-                        }
-                    };
-
-                    item.appendChild(deleteBtn);
-
-                    item.onclick = (ev) => {
-                        if (ev.target !== deleteBtn) {
-                            loadTemplateContent(templates[name]);
-                            // Close menu after loading
-                            closeMenu();
-                            activeTemplateMenu = null;
-                        }
-                    };
-
-                    templateMenu.appendChild(item);
+                keys.forEach(key => {
+                    if (typeof templates[key] === "object") {
+                        // is Category
+                        renderCategory(key, templates[key], templateMenu);
+                    } else {
+                        // is Item
+                        renderItem(key, templates[key], templateMenu);
+                    }
                 });
             }
         } catch (err) {
@@ -604,7 +820,7 @@ function transformToChips(widget, node) {
         }
     }
 
-    async function saveTemplate(name) {
+    async function saveTemplate(name, category) {
         // Combine existing chips with any pending text in the input
         let finalContent = chips.join(", ");
         const pendingInput = input.value.trim();
@@ -613,35 +829,37 @@ function transformToChips(widget, node) {
             else finalContent = pendingInput;
         }
 
-        console.log(`[DynamicChips] Saving template '${name}':`, finalContent);
+        console.log(`[DynamicChips] Saving template '${name}' in '${category}':`, finalContent);
 
         try {
             const response = await api.fetchApi("/string_tools/save_template", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    // Global templates: no IDs needed
                     template_name: name,
+                    category: category,
                     content: finalContent
                 })
             });
             if (response.status !== 200) {
-                throw new Error("Server error: " + response.status);
+                const txt = await response.text();
+                throw new Error(txt);
             }
         } catch (err) {
-            alert("Failed to save template: " + err);
+            const msg = "Failed to save template: " + err.message;
+            alert(msg);
             console.error(err);
-            throw err;
         }
     }
 
-    async function deleteTemplate(name) {
+    async function deleteTemplate(name, category) {
         try {
             const response = await api.fetchApi("/string_tools/delete_template", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    template_name: name
+                    template_name: name,
+                    category: category
                 })
             });
             if (response.status !== 200) {
@@ -784,6 +1002,7 @@ function transformToChips(widget, node) {
             chip.draggable = true;
             chip.dataset.index = index;
             chip.dataset.widgetName = widget.name; // identify source widget
+            chip.title = "使用 Shift+滾輪 調整權重"; // Tooltip for weight adjustment
 
             const textSpan = document.createElement("span");
 
@@ -827,7 +1046,12 @@ function transformToChips(widget, node) {
 
             // Chip Weight Adjustment (Wheel)
             chip.addEventListener("wheel", (e) => {
+                // Only allow weight adjustment if Shift is pressed
+                if (!e.shiftKey) return;
+
                 e.preventDefault();
+                e.stopPropagation(); // Stop scrolling if we are adjusting weight
+
                 const delta = e.deltaY < 0 ? 0.1 : -0.1;
 
                 let content = chipText;

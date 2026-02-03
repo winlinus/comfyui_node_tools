@@ -42,22 +42,36 @@ async def save_template(request):
     try:
         data = await request.json()
         print(f"[StringTools] DEBUG - Save Template Request: {data}")
-        # Global templates: we only care about template_name and content
         template_name = data.get("template_name")
         content = data.get("content")
+        category = data.get("category", "").strip()
 
         if not template_name:
             return web.Response(status=400, text="Missing template_name")
 
         templates = load_templates()
         
-        # Check if templates is in old format (nested dicts), if so, migrates or just starts fresh?
-        # Let's support flat format. If we see nested, we might want to flatten or just start over.
-        # For simplicity in this refactor, we assume we are writing flat keys.
-        # To avoid breaking if file has old data, we just write to it. Mixed data might be messy but acceptable for dev.
-        # Actually better to enforce flat dict.
-        
-        templates[template_name] = content
+        if category:
+            if category not in templates:
+                templates[category] = {}
+            
+            # Handle collision: Category name exists but is a flat template (string)
+            if not isinstance(templates[category], dict):
+                print(f"[StringTools] Migrating flat template '{category}' to folder '{category}'")
+                # Move the existing flat template inside the new folder
+                # We use the category name as the template name for the old content
+                migrated_content = templates[category]
+                templates[category] = {
+                    category: migrated_content
+                }
+            
+            templates[category][template_name] = content
+        else:
+            # Root level save
+            # Check if name conflicts with a folder
+            if template_name in templates and isinstance(templates[template_name], dict):
+                 return web.Response(status=400, text=f"Name conflict: '{template_name}' is already a folder. Please choose a different name.")
+            templates[template_name] = content
         
         if save_templates(templates):
             return web.json_response({"status": "success"})
@@ -71,16 +85,8 @@ async def save_template(request):
 @server.PromptServer.instance.routes.get("/string_tools/get_templates")
 async def get_templates(request):
     try:
-        # Ignore query params, return all
         templates = load_templates()
-        
-        # Filter out legacy nested data if possible? 
-        # Or just return everything. The frontend will display keys.
-        # If user has old data { "node_1": ... }, it will show up as a template named "node_1".
-        # This is fine for migration.
-        
         return web.json_response(templates)
-        
     except Exception as e:
         print(f"[StringTools] Exception in get_templates: {e}")
         return web.Response(status=500, text=str(e))
@@ -90,16 +96,31 @@ async def delete_template(request):
     try:
         data = await request.json()
         template_name = data.get("template_name")
+        category = data.get("category")
+        if category:
+            category = str(category).strip()
+        else:
+            category = ""
 
         if not template_name:
             return web.Response(status=400, text="Missing template_name")
 
         templates = load_templates()
         
-        if template_name in templates:
-            del templates[template_name]
-            save_templates(templates)
-            return web.json_response({"status": "success"})
+        if category:
+            if category in templates and isinstance(templates[category], dict):
+                if template_name in templates[category]:
+                    del templates[category][template_name]
+                    # Validated: If folder empty, remove it? Optional but cleaner.
+                    if not templates[category]:
+                        del templates[category]
+                    save_templates(templates)
+                    return web.json_response({"status": "success"})
+        else:
+            if template_name in templates:
+                del templates[template_name]
+                save_templates(templates)
+                return web.json_response({"status": "success"})
         
         return web.Response(status=404, text="Template not found")
             

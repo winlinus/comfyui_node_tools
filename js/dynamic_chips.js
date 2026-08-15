@@ -9,6 +9,11 @@ import { api } from "../../scripts/api.js";
 const STATE_VERSION = 1;
 const DEFAULT_BLOCK_NAMES = ["品質", "角色", "人數", "體型", "髮", "服裝", "動作", "場景"];
 const WEIGHT_RE = /^\((.+):([0-9]*\.?[0-9]+)\)$/;
+// Bounded because a single wheel flick travels a long way, and on Illustrious
+// anything past ~1.5 is already burnt.
+const WEIGHT_MIN = 0.1;
+const WEIGHT_MAX = 2.0;
+const WEIGHT_STEP = 0.1;
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -24,6 +29,12 @@ styleElement.textContent = `
         font-size: 12px;
         color: var(--fg-color);
         box-sizing: border-box;
+        /* One scrollbar for the whole editor. This also makes .pe-root a
+           clipping boundary, which is why dropdowns flip up when they'd
+           otherwise open past its bottom edge — see placeDropdown(). */
+        height: 100%;
+        overflow-y: auto;
+        overflow-x: hidden;
     }
 
     .pe-block {
@@ -123,6 +134,30 @@ styleElement.textContent = `
 
     .pe-chip-remove { cursor: pointer; font-weight: bold; color: #ff6b6b; }
     .pe-chip-remove:hover { color: #ff0000; }
+
+    /* Always present, but quiet until you look at the chip. Hidden-on-hover
+       would be tidier and just as undiscoverable as Shift+wheel already was. */
+    .pe-weight { display: flex; align-items: center; gap: 1px; }
+    .pe-weight-btn {
+        cursor: pointer;
+        opacity: 0.3;
+        padding: 0 2px;
+        font-weight: bold;
+        line-height: 1;
+        user-select: none;
+    }
+    .pe-chip:hover .pe-weight-btn { opacity: 0.75; }
+    .pe-weight-btn:hover { opacity: 1; color: var(--primary-color, #2a81f6); }
+    .pe-weight-val {
+        display: none;
+        cursor: pointer;
+        opacity: 0.85;
+        min-width: 20px;
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+    }
+    .pe-weight.active .pe-weight-val { display: inline; }
+    .pe-weight-val:hover { color: var(--primary-color, #2a81f6); }
 
     .pe-chip-edit {
         border: none; outline: none; background: transparent;
@@ -495,6 +530,29 @@ function createEditor(node) {
         app.graph?.setDirtyCanvas(true, true);
     }
 
+    /**
+     * Show a dropdown below its anchor, or above it when below would open past
+     * the scroll container's bottom edge and there is more room above.
+     *
+     * Deliberately not portalled to document.body: that is the coupling
+     * ADR-0003 removed, and it would have to re-sync on every canvas pan.
+     */
+    function placeDropdown(dropdown) {
+        dropdown.style.top = "100%";
+        dropdown.style.bottom = "auto";
+        dropdown.style.display = "flex";
+
+        const rootRect = root.getBoundingClientRect();
+        const ddRect = dropdown.getBoundingClientRect();
+        const roomBelow = rootRect.bottom - ddRect.top;
+        const roomAbove = ddRect.bottom - dropdown.offsetHeight - rootRect.top;
+
+        if (ddRect.bottom > rootRect.bottom && roomAbove > roomBelow) {
+            dropdown.style.top = "auto";
+            dropdown.style.bottom = "100%";
+        }
+    }
+
     // ----- rendering -----
 
     const placeholder = document.createElement("div");
@@ -525,8 +583,6 @@ function createEditor(node) {
         allTemplateMenu.className = "pe-dropdown";
         allTemplateMenu.style.left = "auto";
         allTemplateMenu.style.right = "0";
-        allTemplateMenu.style.bottom = "100%";
-        allTemplateMenu.style.top = "auto";
 
         footer.append(addBtn, allTemplateBtn, allTemplateMenu);
         root.appendChild(footer);
@@ -538,7 +594,7 @@ function createEditor(node) {
             },
         });
 
-        requestResize();
+        requestRedraw();
     }
 
     function renderBlock(block, index) {
@@ -667,20 +723,60 @@ function createEditor(node) {
         chip.draggable = true;
         chip.title = "Shift+滾輪 調整權重，雙擊編輯";
 
+        // The chip shows the bare tag. The weight gets its own control, so the
+        // stored "(1girl:1.2)" never has to be read as text by a human.
         const { base, weight } = splitWeight(chipText);
         const textSpan = document.createElement("span");
         const tag = tagsByEn.get(base);
+        textSpan.textContent = base;
         if (tag && tag.zh) {
-            textSpan.textContent = weight === 1 ? base : `(${base}`;
             const zh = document.createElement("span");
             zh.className = "zh";
             zh.textContent = ` (${tag.zh})`;
             textSpan.appendChild(zh);
-            if (weight !== 1) textSpan.append(`:${weight})`);
-        } else {
-            textSpan.textContent = chipText;
         }
         chip.appendChild(textSpan);
+
+        function setWeight(next) {
+            const rounded = Math.round(next * 10) / 10;
+            if (rounded < WEIGHT_MIN || rounded > WEIGHT_MAX) return;
+            block.chips[chipIndex] = joinWeight(splitWeight(block.chips[chipIndex]).base, rounded);
+            commit();
+            renderChips(block, blockIndex, chipsArea, input);
+        }
+
+        const weightCtl = document.createElement("span");
+        weightCtl.className = "pe-weight" + (weight === 1 ? "" : " active");
+
+        const minusBtn = document.createElement("span");
+        minusBtn.className = "pe-weight-btn";
+        minusBtn.textContent = "−";
+        minusBtn.title = `降低權重（下限 ${WEIGHT_MIN}）`;
+        minusBtn.onclick = (e) => {
+            e.stopPropagation();
+            setWeight(splitWeight(block.chips[chipIndex]).weight - WEIGHT_STEP);
+        };
+
+        const weightVal = document.createElement("span");
+        weightVal.className = "pe-weight-val";
+        weightVal.textContent = weight.toFixed(1);
+        weightVal.title = "點一下重設為 1.0";
+        weightVal.onclick = (e) => {
+            e.stopPropagation();
+            setWeight(1);
+        };
+
+        const plusBtn = document.createElement("span");
+        plusBtn.className = "pe-weight-btn";
+        plusBtn.textContent = "+";
+        plusBtn.title = `提高權重（上限 ${WEIGHT_MAX}）`;
+        plusBtn.onclick = (e) => {
+            e.stopPropagation();
+            setWeight(splitWeight(block.chips[chipIndex]).weight + WEIGHT_STEP);
+        };
+
+        weightCtl.append(minusBtn, weightVal, plusBtn);
+        chip.appendChild(weightCtl);
 
         const removeBtn = document.createElement("span");
         removeBtn.className = "pe-chip-remove";
@@ -690,19 +786,16 @@ function createEditor(node) {
             block.chips.splice(chipIndex, 1);
             commit();
             renderChips(block, blockIndex, chipsArea, input);
-            requestResize();
+            requestRedraw();
         };
         chip.appendChild(removeBtn);
 
+        // Verified working as-is; left untouched on purpose.
         chip.addEventListener("wheel", (e) => {
             if (!e.shiftKey) return;
             e.preventDefault();
             e.stopPropagation();
-            const parsed = splitWeight(block.chips[chipIndex]);
-            const next = Math.round((parsed.weight + (e.deltaY < 0 ? 0.1 : -0.1)) * 10) / 10;
-            block.chips[chipIndex] = joinWeight(parsed.base, next);
-            commit();
-            renderChips(block, blockIndex, chipsArea, input);
+            setWeight(splitWeight(block.chips[chipIndex]).weight + (e.deltaY < 0 ? WEIGHT_STEP : -WEIGHT_STEP));
         });
 
         chip.addEventListener("dblclick", (e) => {
@@ -725,7 +818,7 @@ function createEditor(node) {
                 else block.chips.splice(chipIndex, 1);
                 commit();
                 renderChips(block, blockIndex, chipsArea, input);
-                requestResize();
+                requestRedraw();
             };
             editInput.addEventListener("blur", commitEdit);
             editInput.addEventListener("keydown", (ev) => {
@@ -897,7 +990,7 @@ function createEditor(node) {
             input.value = "";
             commit();
             renderChips(block, blockIndex, chipsArea, input);
-            requestResize();
+            requestRedraw();
         };
 
         const renderAutocomplete = (filterText) => {
@@ -934,7 +1027,7 @@ function createEditor(node) {
                 };
                 dropdown.appendChild(item);
             });
-            dropdown.style.display = "flex";
+            placeDropdown(dropdown);
         };
 
         input.addEventListener("keydown", (e) => {
@@ -969,7 +1062,7 @@ function createEditor(node) {
                 block.chips.pop();
                 commit();
                 renderChips(block, blockIndex, chipsArea, input);
-                requestResize();
+                requestRedraw();
             }
         });
 
@@ -1015,6 +1108,9 @@ function createEditor(node) {
             closeOpenDropdown();
             openDropdown = { element: menu, trigger, close };
             await refreshMenu();
+            // Only now is the menu's real height known, so this is where the
+            // flip-up decision can actually be made.
+            placeDropdown(menu);
         };
 
         const addItem = (parent, label, className, onClick) => {
@@ -1137,17 +1233,27 @@ function createEditor(node) {
 
     // ----- sizing -----
 
-    let resizeQueued = false;
-    function requestResize() {
-        if (resizeQueued) return;
-        resizeQueued = true;
+    let redrawQueued = false;
+    function requestRedraw() {
+        if (redrawQueued) return;
+        redrawQueued = true;
         requestAnimationFrame(() => {
-            resizeQueued = false;
-            const min = node.computeSize();
-            if (node.size[1] < min[1] || node.size[0] < min[0]) {
-                node.setSize([Math.max(node.size[0], min[0]), Math.max(node.size[1], min[1])]);
-            }
+            redrawQueued = false;
             node.setDirtyCanvas(true, true);
+        });
+    }
+
+    /**
+     * Grow the node once so its content is visible from the start. Deliberately
+     * one-shot: continuous fitting is what made the node impossible to shrink.
+     */
+    function fitToContent() {
+        requestAnimationFrame(() => {
+            const shortfall = root.scrollHeight - root.clientHeight;
+            if (shortfall > 0) {
+                node.setSize([node.size[0], node.size[1] + shortfall]);
+                node.setDirtyCanvas(true, true);
+            }
         });
     }
 
@@ -1157,11 +1263,13 @@ function createEditor(node) {
 
     node.addDOMWidget("prompt_editor_ui", "div", root, {
         serialize: false,
-        getMinHeight: () => Math.max(120, root.scrollHeight + 8),
+        // MUST be a constant. Deriving this from content height makes the floor
+        // rise with the content, which silently takes away the user's ability to
+        // shrink the node. 60 matches ComfyUI's own built-in DOM widgets.
+        getMinHeight: () => 60,
     });
 
-    const observer = new ResizeObserver(() => requestResize());
-    observer.observe(root);
+    fitToContent();
 
     node.__promptEditor = {
         /** Called when a chip is dragged out of this node into another one. */
@@ -1172,17 +1280,12 @@ function createEditor(node) {
         },
     };
 
-    const originalOnRemoved = node.onRemoved;
-    node.onRemoved = function () {
-        observer.disconnect();
-        if (originalOnRemoved) originalOnRemoved.apply(this, arguments);
-    };
-
     // Re-read state when a workflow is loaded on top of this node.
     const originalOnConfigure = node.onConfigure;
     node.onConfigure = function () {
         if (originalOnConfigure) originalOnConfigure.apply(this, arguments);
         blocks = readState(dataWidget);
         renderAll();
+        fitToContent();
     };
 }

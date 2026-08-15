@@ -47,3 +47,21 @@ js/dynamic_chips.js:1561 // Note: We removed the centralized onCollapse hook in 
 - 十個手調的 `z-index` 全部刪除，層級交給 ComfyUI。
 - 這次遷移與 [ADR-0002](0002-prompt-state-as-single-json-widget.md) 的渲染層改寫碰同一批程式碼，**一起做**。
 - README 的「智慧防遮擋」與「節點縮小會自動隱藏」目前是願望不是現況，實作完成後要一併改寫。
+
+## 兩條由此推出的規則
+
+初版實作各違反了一條，都是實測才發現，所以寫下來。
+
+### `getMinHeight` 必須回傳常數
+
+ComfyUI 以 `getMinHeight?.() ?? 50` 取得 DOM widget 的**最小**高度，它自己的內建實作全部回傳常數（`60`、`e.minHeight ?? 58`）。
+
+初版寫成 `() => Math.max(120, root.scrollHeight + 8)`，把地板綁在內容高度上 —— 內容越多，能縮到的最小高度就越大，**等於默默奪走使用者手動縮放節點的能力**。使用者的回報是「節點高度固定，沒法縮短」。
+
+正確做法：回傳常數（本專案用 `60`，與 ComfyUI 內建一致），讓內容用 `overflow-y: auto` 在固定高度裡捲動。若想要好的初始高度，就在掛載時**一次性**貼合內容，不要持續貼合。
+
+### 浮動元素不要為了避開裁切而 portal 回 `document.body`
+
+`overflow: auto` 會讓容器成為裁切邊界，所以下拉選單有可能被切掉。此時最直覺的修法是把下拉掛到 `document.body` —— **那正是這份 ADR 花了整個改寫才擺脫的耦合**，而且會再度需要在畫布平移時同步位置，也就是舊 watchdog 的老路。
+
+正確做法：在容器內解決。本專案的下拉在下方空間不足且上方空間較多時自動往上翻（`placeDropdown()`）。單一區塊本身高過可見範圍時仍會被裁，這是接受的取捨。

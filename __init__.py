@@ -1,11 +1,11 @@
-from .string_combiner import DynamicStringCombiner
+from .prompt_editor import PromptEditor
 
 NODE_CLASS_MAPPINGS = {
-    "DynamicStringCombiner": DynamicStringCombiner
+    "PromptEditor": PromptEditor
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "DynamicStringCombiner": "Prompt Editor"
+    "PromptEditor": "Prompt Editor"
 }
 
 WEB_DIRECTORY = "./js"
@@ -25,7 +25,7 @@ def load_templates():
         with open(TEMPLATES_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
-        print(f"[StringTools] Error loading templates: {e}")
+        print(f"[PromptEditor] Error loading templates: {e}")
         return {}
 
 def save_templates(data):
@@ -34,14 +34,14 @@ def save_templates(data):
             json.dump(data, f, indent=4, ensure_ascii=False)
         return True
     except Exception as e:
-        print(f"[StringTools] Error saving templates: {e}")
+        print(f"[PromptEditor] Error saving templates: {e}")
         return False
 
-@server.PromptServer.instance.routes.post("/string_tools/save_template")
+@server.PromptServer.instance.routes.post("/prompt_editor/save_template")
 async def save_template(request):
     try:
         data = await request.json()
-        print(f"[StringTools] DEBUG - Save Template Request: {data}")
+        print(f"[PromptEditor] DEBUG - Save Template Request: {data}")
         template_name = data.get("template_name")
         content = data.get("content")
         category = data.get("category", "").strip()
@@ -57,7 +57,7 @@ async def save_template(request):
             
             # Handle collision: Category name exists but is a flat template (string)
             if not isinstance(templates[category], dict):
-                print(f"[StringTools] Migrating flat template '{category}' to folder '{category}'")
+                print(f"[PromptEditor] Migrating flat template '{category}' to folder '{category}'")
                 # Move the existing flat template inside the new folder
                 # We use the category name as the template name for the old content
                 migrated_content = templates[category]
@@ -79,19 +79,19 @@ async def save_template(request):
             return web.Response(status=500, text="Failed to save template")
             
     except Exception as e:
-        print(f"[StringTools] Exception in save_template: {e}")
+        print(f"[PromptEditor] Exception in save_template: {e}")
         return web.Response(status=500, text=str(e))
 
-@server.PromptServer.instance.routes.get("/string_tools/get_templates")
+@server.PromptServer.instance.routes.get("/prompt_editor/get_templates")
 async def get_templates(request):
     try:
         templates = load_templates()
         return web.json_response(templates)
     except Exception as e:
-        print(f"[StringTools] Exception in get_templates: {e}")
+        print(f"[PromptEditor] Exception in get_templates: {e}")
         return web.Response(status=500, text=str(e))
 
-@server.PromptServer.instance.routes.post("/string_tools/delete_template")
+@server.PromptServer.instance.routes.post("/prompt_editor/delete_template")
 async def delete_template(request):
     try:
         data = await request.json()
@@ -125,6 +125,6 @@ async def delete_template(request):
         return web.Response(status=404, text="Template not found")
             
     except Exception as e:
-        print(f"[StringTools] Exception in delete_template: {e}")
+        print(f"[PromptEditor] Exception in delete_template: {e}")
         return web.Response(status=500, text=str(e))
 
